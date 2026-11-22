@@ -1,6 +1,3 @@
-// SPDX-FileCopyrightText: 2022 Lawrie Griffiths
-// SPDX-License-Identifier: BSD-2-Clause
-
 `default_nettype none
 module osr #(
   parameter DATA_WIDTH = 16,
