@@ -536,7 +536,10 @@ module machine (
   );
 
   // ISR
-  isr shift_in (
+  isr #(
+    .DATA_WIDTH(32),
+    .COUNT_WIDTH(6)
+  ) shift_in (
     .clk(clk),
     .penable(enabled),
     .reset(reset | restart),
@@ -552,7 +555,10 @@ module machine (
   );
 
   // OSR
-  osr shift_out (
+  osr #(
+    .DATA_WIDTH(32),
+    .COUNT_WIDTH(6)
+  ) shift_out (
     .clk(clk),
     .penable(enabled),
     .reset(reset | restart),
