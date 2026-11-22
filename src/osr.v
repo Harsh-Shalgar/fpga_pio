@@ -2,49 +2,48 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 `default_nettype none
-module osr (
-  input         clk,
-  input         penable,
-  input         reset,
-  input         stalled,
-  input [31:0]  din,
-  input [4:0]   shift,
-  input         dir,   // 0 - left, 1 - right
-  input         set,
-  input         do_shift,
-  output [31:0] dout,
-  output [5:0]  shift_count
+module osr #(
+  parameter DATA_WIDTH = 16,
+  parameter COUNT_WIDTH = 5
+) (
+  input                          clk,
+  input                          penable,
+  input                          reset,
+  input                          stalled,
+  input      [DATA_WIDTH-1:0]    din,
+  input      [4:0]               shift,
+  input                          dir,       // 0 = shift left, 1 = shift right
+  input                          set,
+  input                          do_shift,
+  output     [DATA_WIDTH-1:0]    dout,
+  output     [COUNT_WIDTH-1:0]   shift_count
 );
 
-  reg [31:0] shift_reg;
-  reg [5:0]  count;
+  reg [DATA_WIDTH-1:0] shift_reg; // Stores the 16-bit OSR value.
+  reg [COUNT_WIDTH-1:0] count; // Stores shifted-out bits; DATA_WIDTH means empty.
 
-  // A shift value of 0 means shift 32
-  wire [5:0] shift_val = shift == 0 ? 32 : shift;
-  // Calculate the 64-bit value of the shift register after a shift
-  wire [63:0] shift64 = dir ? {shift_reg, 32'b0} >> shift_val : {32'b0, shift_reg} << shift_val;
-  // Calculate the right-aligned shifted out value
-  wire [31:0] shift_out = dir ? (shift64[31:0] >> (32 - shift_val)) : shift64[63:32];
-  // Calculate the new shift register value after a shift
-  wire [31:0] new_shift = dir ? shift64[63:32] : shift64[31:0];
+  wire [COUNT_WIDTH-1:0] shift_val = shift == 0 ? DATA_WIDTH : shift; // Encodes zero as a full-width shift.
+  wire [DATA_WIDTH-1:0] source_mask = {DATA_WIDTH{1'b1}} >> (DATA_WIDTH-shift_val); // Creates a mask for the low N OSR bits.
+  wire [DATA_WIDTH-1:0] shifted_out = dir ? (shift_reg & source_mask) : (shift_reg >> (DATA_WIDTH-shift_val)); // Extracts the bits removed from the OSR.
+  wire [DATA_WIDTH-1:0] shifted_value = dir ? (shift_reg >> shift_val) : (shift_reg << shift_val); // Calculates the OSR value remaining after a shift.
+  wire [COUNT_WIDTH-1:0] next_count = (count + shift_val) >= DATA_WIDTH ? DATA_WIDTH : (count + shift_val); // Saturates the shifted-out count at DATA_WIDTH.
 
-  always @(posedge clk) begin
-    if (reset) begin
-      shift_reg <= 0;
-      count <= 32;  // Empty (read to trigger auto-pull)
-    end else if (penable && !stalled) begin
-       if (set) begin
-         shift_reg <= din;
-         count <= 0;
-       end else if (do_shift) begin
-         shift_reg <= new_shift;
-         count <= count + shift_val > 32 ? 32 : count + shift_val;
-       end
+  always @(posedge clk) begin // Updates OSR state only on enabled, non-stalled cycles.
+    if (reset) begin // Clears the OSR and marks it empty.
+      shift_reg <= {DATA_WIDTH{1'b0}}; // Clears all OSR data bits.
+      count <= DATA_WIDTH; // Marks the OSR as empty.
+    end else if (penable && !stalled) begin // Accepts PULL or OUT updates only when execution is enabled.
+      if (set) begin // Loads a newly pulled or MOV-written word.
+        shift_reg <= din; // Replaces the OSR contents.
+        count <= 0; // Marks a newly loaded word as full.
+      end else if (do_shift) begin // Applies OUT's shift amount.
+        shift_reg <= shifted_value; // Stores the remaining OSR bits.
+        count <= next_count; // Records the number of shifted-out bits.
+      end
     end
   end
 
-  // The output value is the amount shifted out if do_shift ia active otherwise the current shift register
-  assign dout = do_shift ? shift_out : shift_reg;
-  assign shift_count = count;
+  assign dout = do_shift ? shifted_out : shift_reg; // Sends shifted-out bits for OUT or the full OSR for MOV.
+  assign shift_count = count; // Exposes OSR status to threshold and JMP checks.
 
 endmodule
